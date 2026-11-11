@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Current Tasks</title>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body class="dp">
+  <aside class="dp-panel" aria-label="Current tasks">
+    <div class="dp-panel__top">
+      <div class="dp-panel__bar">
+        <h1 class="dp-panel__title">Current tasks</h1>
+        <span class="dp-count" id="totalCount">0</span>
+        <div class="dp-panel__actions">
+          <button id="syncBtn" class="dp-btn dp-btn--primary" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"></path>
+              <path d="M3 21v-5h5"></path>
+              <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8"></path>
+              <path d="M21 3v5h-5"></path>
+            </svg>
+            <span id="syncBtnLabel">Sync</span>
+          </button>
+          <button id="settingsBtn" class="dp-icon-btn" type="button" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 7h9M17 7h3M4 17h3M11 17h9"></path>
+              <circle cx="15" cy="7" r="2"></circle>
+              <circle cx="9" cy="17" r="2"></circle>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div id="syncStatus" class="dp-sync">
+        <span class="dp-sync__dot"></span>
+        <span id="syncStatusText">Click Sync to load tasks</span>
+      </div>
+
+      <label class="dp-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle>
+          <path d="m20 20-3.5-3.5"></path>
+        </svg>
+        <input id="searchInput" type="search" placeholder="Search truck number" aria-label="Search by truck number" autocomplete="off" />
+        <kbd class="dp-kbd">/</kbd>
+      </label>
+
+      <div id="filterTabs" class="dp-tabs" role="tablist">
+        <span class="dp-tabs__ind" aria-hidden="true"></span>
+        <button class="dp-tab" role="tab" data-filter="all" aria-selected="true" type="button">All <span id="countAll">0</span></button>
+        <button class="dp-tab" role="tab" data-filter="today" aria-selected="false" type="button">Today <span id="countToday">0</span></button>
+        <button class="dp-tab" role="tab" data-filter="tomorrow" aria-selected="false" type="button">Tomorrow <span id="countTomorrow">0</span></button>
+      </div>
+
+      <div class="dp-progress" aria-hidden="true"></div>
+    </div>
+
+    <main id="list" class="dp-panel__list"></main>
+  </aside>
+
+  <div id="toast" class="dp-toast" role="status" aria-live="polite">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>
+    <span id="toastText"></span>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

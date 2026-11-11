@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Bald Logistics — Current Tasks",
+  "version": "1.0.0",
+  "description": "Sync and view current tasks from portal.baldlogistics.eu",
+  "action": {
+    "default_title": "Current tasks"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "tabs", "alarms", "scripting", "sidePanel"],
+  "host_permissions": ["https://portal.baldlogistics.eu/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://portal.baldlogistics.eu/app/main/current-tasks*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

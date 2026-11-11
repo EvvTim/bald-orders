@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Settings — Bald Logistics</title>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body class="dp">
+  <h1>Sync settings</h1>
+
+  <label class="row checkbox-row">
+    <input type="checkbox" id="autoSyncEnabled" />
+    Automatic sync
+  </label>
+
+  <label class="row">
+    Auto-sync interval (minutes)
+    <input type="number" id="intervalMinutes" min="1" max="1440" step="1" />
+  </label>
+
+  <div class="actions">
+    <button id="saveBtn" class="dp-btn dp-btn--primary" type="button">Save</button>
+    <span id="savedMsg" class="saved-msg"></span>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
