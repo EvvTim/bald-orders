@@ -1,0 +1,22 @@
+{
+  "name": "bald-orders",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Sync and view current tasks from portal.baldlogistics.eu",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.7",
+    "jsdom": "^31.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-web-extension": "^4.5.1",
+    "vitest": "^5.1.0"
+  }
+}

@@ -7,18 +7,18 @@
     "default_title": "Current tasks"
   },
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "src/sidepanel.html"
   },
-  "options_page": "options.html",
+  "options_page": "src/options.html",
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background.ts"
   },
   "permissions": ["storage", "tabs", "alarms", "scripting", "sidePanel"],
   "host_permissions": ["https://portal.baldlogistics.eu/*"],
   "content_scripts": [
     {
       "matches": ["https://portal.baldlogistics.eu/app/main/current-tasks*"],
-      "js": ["content.js"],
+      "js": ["src/content.ts"],
       "run_at": "document_idle"
     }
   ]

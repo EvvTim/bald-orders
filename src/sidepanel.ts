@@ -1,28 +1,39 @@
-const listEl = document.getElementById('list');
-const panelEl = document.querySelector('.dp-panel');
-const syncBtn = document.getElementById('syncBtn');
-const settingsBtn = document.getElementById('settingsBtn');
-const searchInput = document.getElementById('searchInput');
-const totalCountEl = document.getElementById('totalCount');
-const syncStatusEl = document.getElementById('syncStatus');
-const syncStatusTextEl = document.getElementById('syncStatusText');
-const filterTabsEl = document.getElementById('filterTabs');
-const countAllEl = document.getElementById('countAll');
-const countTodayEl = document.getElementById('countToday');
-const countTomorrowEl = document.getElementById('countTomorrow');
-const toastEl = document.getElementById('toast');
-const toastTextEl = document.getElementById('toastText');
+import { dayDiff, pad2, parseDMY, renderStopDateHtml, toSortableTime } from './lib/dates';
+import { buildMapsUrl, buildSingleMapsUrl, locationKey, parseLocation, splitCountry } from './lib/location';
+import type { Location, ParsedDateTime, StoredState, Task } from './lib/types';
 
-let allTasks = [];
-let syncedAt = null;
-let unseenNumbers = [];
-let favoriteKeys = new Set();
+interface EnrichedTask extends Task {
+  load: ParsedDateTime;
+  unload: ParsedDateTime;
+  loadLoc: Location;
+  unloadLoc: Location;
+  isNew: boolean;
+}
+
+const listEl = document.getElementById('list') as HTMLElement;
+const panelEl = document.querySelector('.dp-panel') as HTMLElement;
+const syncBtn = document.getElementById('syncBtn') as HTMLButtonElement;
+const settingsBtn = document.getElementById('settingsBtn') as HTMLButtonElement;
+const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+const totalCountEl = document.getElementById('totalCount') as HTMLElement;
+const syncStatusEl = document.getElementById('syncStatus') as HTMLElement;
+const syncStatusTextEl = document.getElementById('syncStatusText') as HTMLElement;
+const filterTabsEl = document.getElementById('filterTabs') as HTMLElement;
+const countAllEl = document.getElementById('countAll') as HTMLElement;
+const countTodayEl = document.getElementById('countToday') as HTMLElement;
+const countTomorrowEl = document.getElementById('countTomorrow') as HTMLElement;
+const toastEl = document.getElementById('toast') as HTMLElement;
+const toastTextEl = document.getElementById('toastText') as HTMLElement;
+
+let allTasks: Task[] = [];
+let syncedAt: number | null = null;
+let unseenNumbers: string[] = [];
+let favoriteKeys = new Set<string>();
 let searchQuery = '';
 let activeFilter = 'all';
-let toastTimer = null;
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
 const STALE_AFTER_MS = 15 * 60 * 1000;
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const ICON_COPY =
   '<svg class="dp-copy__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2.5"></rect><path d="M5 15V6a3 3 0 0 1 3-3h9"></path></svg>' +
@@ -41,7 +52,7 @@ function init() {
   wireEvents();
   loadAndRender();
   placeTabIndicator();
-  setInterval(updateSyncStatus, 30000);
+  setInterval(() => updateSyncStatus(), 30000);
 }
 
 function applyTheme() {
@@ -63,9 +74,9 @@ function wireEvents() {
   });
 
   filterTabsEl.addEventListener('click', (e) => {
-    const tabEl = e.target.closest('.dp-tab');
+    const tabEl = (e.target as HTMLElement).closest('.dp-tab') as HTMLElement | null;
     if (!tabEl) return;
-    activeFilter = tabEl.dataset.filter;
+    activeFilter = tabEl.dataset.filter || 'all';
     filterTabsEl.querySelectorAll('.dp-tab').forEach((b) => {
       b.setAttribute('aria-selected', String(b === tabEl));
     });
@@ -76,31 +87,33 @@ function wireEvents() {
   window.addEventListener('resize', placeTabIndicator);
 
   document.addEventListener('animationend', (e) => {
-    if (e.target.classList && e.target.classList.contains('dp-card--enter')) {
-      e.target.classList.remove('dp-card--enter');
+    const target = e.target as HTMLElement;
+    if (target.classList && target.classList.contains('dp-card--enter')) {
+      target.classList.remove('dp-card--enter');
     }
   });
 
   listEl.addEventListener('click', (e) => {
-    const copyEl = e.target.closest('.dp-copy');
+    const target = e.target as HTMLElement;
+    const copyEl = target.closest('.dp-copy') as HTMLElement | null;
     if (copyEl) {
       e.stopPropagation();
       handleCopyClick(copyEl);
       return;
     }
-    const pinEl = e.target.closest('.dp-pin-btn');
+    const pinEl = target.closest('.dp-pin-btn') as HTMLElement | null;
     if (pinEl) {
       e.stopPropagation();
       chrome.tabs.create({ url: pinEl.dataset.mapsUrl });
       return;
     }
-    const favEl = e.target.closest('.dp-fav-btn');
+    const favEl = target.closest('.dp-fav-btn') as HTMLElement | null;
     if (favEl) {
       e.stopPropagation();
       toggleFavorite(favEl);
       return;
     }
-    const routeEl = e.target.closest('.dp-btn--route');
+    const routeEl = target.closest('.dp-btn--route') as HTMLElement | null;
     if (routeEl) {
       e.stopPropagation();
       chrome.tabs.create({ url: routeEl.dataset.mapsUrl });
@@ -132,8 +145,8 @@ function wireEvents() {
   });
 }
 
-async function loadAndRender(animateSync) {
-  const { tasks, syncedAt: sAt, unseenNumbers: un, favoriteLocations } = await chrome.storage.local.get([
+async function loadAndRender(animateSync?: boolean) {
+  const { tasks, syncedAt: sAt, unseenNumbers: un, favoriteLocations } = await chrome.storage.local.get<StoredState>([
     'tasks',
     'syncedAt',
     'unseenNumbers',
@@ -163,7 +176,7 @@ async function sync() {
     }
     await loadAndRender(true);
   } catch (e) {
-    showToast('Error: ' + e.message);
+    showToast('Error: ' + (e as Error).message);
   } finally {
     syncBtn.disabled = false;
     syncBtn.removeAttribute('aria-busy');
@@ -171,7 +184,7 @@ async function sync() {
   }
 }
 
-async function toggleFavorite(btn) {
+async function toggleFavorite(btn: HTMLElement) {
   const key = btn.dataset.favKey;
   if (!key) return;
   const willBeActive = !favoriteKeys.has(key);
@@ -189,15 +202,15 @@ async function toggleFavorite(btn) {
 }
 
 function placeTabIndicator() {
-  const ind = filterTabsEl.querySelector('.dp-tabs__ind');
-  const sel = filterTabsEl.querySelector('.dp-tab[aria-selected="true"]');
+  const ind = filterTabsEl.querySelector('.dp-tabs__ind') as HTMLElement | null;
+  const sel = filterTabsEl.querySelector('.dp-tab[aria-selected="true"]') as HTMLElement | null;
   if (!ind || !sel) return;
   ind.style.width = sel.offsetWidth + 'px';
   ind.style.transform = `translateX(${sel.offsetLeft}px)`;
   filterTabsEl.classList.add('dp-tabs--live');
 }
 
-async function ackTask(number, cardEl) {
+async function ackTask(number: string, cardEl: HTMLElement) {
   cardEl.classList.remove('dp-card--new');
   const badge = cardEl.querySelector('.dp-badge-new');
   if (badge) badge.remove();
@@ -209,7 +222,7 @@ async function ackTask(number, cardEl) {
   }
 }
 
-async function handleCopyClick(btn) {
+async function handleCopyClick(btn: HTMLElement & { _copyTimer?: ReturnType<typeof setTimeout> }) {
   const value = btn.dataset.copy || '';
   const label = btn.dataset.label || 'Value';
   if (!value) return;
@@ -225,7 +238,7 @@ async function handleCopyClick(btn) {
   btn.classList.add('dp-copy--done');
   if (row) {
     row.classList.remove('dp-copy-row--flash', 'dp-copy-row--done');
-    void row.offsetWidth;
+    void (row as HTMLElement).offsetWidth;
     row.classList.add('dp-copy-row--flash', 'dp-copy-row--done');
   }
   showToast(capitalize(label) + ' copied');
@@ -235,7 +248,7 @@ async function handleCopyClick(btn) {
   }, 1500);
 }
 
-function showToast(text) {
+function showToast(text: string) {
   toastTextEl.textContent = text;
   toastEl.classList.remove('is-visible');
   void toastEl.offsetWidth;
@@ -244,105 +257,30 @@ function showToast(text) {
   toastTimer = setTimeout(() => toastEl.classList.remove('is-visible'), 1600);
 }
 
-function capitalize(s) {
+function capitalize(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-function escapeHtml(str) {
-  return (str || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function escapeHtml(str: string | undefined | null): string {
+  return (str || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
 }
 
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
-
-// Always dd.mm.yyyy for absolute dates.
-function formatAbsDate(d) {
-  return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`;
-}
-
-// Scraped as "DD-MM-YYYY HH:MM" by content.js.
-function parseDMY(raw) {
-  const parts = (raw || '').split(/\s+/).filter(Boolean);
-  const datePart = parts[0] || '';
-  const timePart = parts[1] || '';
-  const m = datePart.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (!m) return { date: null, time: timePart };
-  const [, dd, mm, yyyy] = m;
-  return { date: new Date(Number(yyyy), Number(mm) - 1, Number(dd)), time: timePart || '' };
-}
-
-function dayDiff(a, b) {
-  const da = new Date(a.getFullYear(), a.getMonth(), a.getDate());
-  const db = new Date(b.getFullYear(), b.getMonth(), b.getDate());
-  return Math.round((da - db) / 86400000);
-}
-
-function toSortableTime(dateObj, timeStr) {
-  if (!dateObj) return Number.POSITIVE_INFINITY;
-  const [hh, mm] = (timeStr || '00:00').split(':').map(Number);
-  return new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), hh || 0, mm || 0).getTime();
-}
-
-function renderStopDateHtml(dateObj) {
-  if (!dateObj) return '';
-  const diff = dayDiff(dateObj, new Date());
-  if (diff === 0) return `<strong>Today</strong> · ${formatAbsDate(dateObj)}`;
-  if (diff === -1) return `<strong>Yesterday</strong> · ${formatAbsDate(dateObj)}`;
-  if (diff === 1) return `<strong>Tomorrow</strong> · ${formatAbsDate(dateObj)}`;
-  return `${WEEKDAYS[dateObj.getDay()]} ${formatAbsDate(dateObj)}`;
-}
-
-function parseLocation(raw) {
-  const lines = (raw || '').split('\n').map((s) => s.trim()).filter(Boolean);
-  return {
-    name: lines[0] || '',
-    street: lines[1] || '',
-    countryCity: lines[2] || '',
-  };
-}
-
-function splitCountry(countryCity) {
-  const m = (countryCity || '').match(/^([A-Z]{2})\s+(.+)$/);
-  if (m) return { cc: m[1], rest: m[2] };
-  return { cc: null, rest: countryCity || '' };
-}
-
-function buildMapsUrl(loadLoc, unloadLoc) {
-  const origin = [loadLoc.name, loadLoc.street, loadLoc.countryCity].filter(Boolean).join(', ');
-  const destination = [unloadLoc.name, unloadLoc.street, unloadLoc.countryCity].filter(Boolean).join(', ');
-  if (!origin || !destination) return null;
-  const params = new URLSearchParams({ api: '1', origin, destination, travelmode: 'driving' });
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
-}
-
-function buildSingleMapsUrl(loc) {
-  const q = [loc.name, loc.street, loc.countryCity].filter(Boolean).join(', ');
-  if (!q) return null;
-  const params = new URLSearchParams({ api: '1', query: q });
-  return `https://www.google.com/maps/search/?${params.toString()}`;
-}
-
-function locationKey(loc) {
-  return [loc.name, loc.street, loc.countryCity].join('|').toLowerCase();
-}
-
-function copyBtn(value, label) {
+function copyBtn(value: string, label: string): string {
   return `<button type="button" class="dp-copy" data-copy="${escapeHtml(value)}" data-label="${escapeHtml(label)}" aria-label="Copy ${escapeHtml(label)}" title="Copy ${escapeHtml(label)}">${ICON_COPY}</button>`;
 }
 
-function pinBtn(url) {
+function pinBtn(url: string): string {
   return `<button type="button" class="dp-row-btn dp-pin-btn" data-maps-url="${escapeHtml(url)}" aria-label="Open in Google Maps" title="Open in Google Maps">${ICON_PIN}</button>`;
 }
 
-function favBtn(loc) {
+function favBtn(loc: Location): string {
   const key = locationKey(loc);
   const active = favoriteKeys.has(key);
   const label = active ? 'Remove from favourites' : 'Add to favourites';
   return `<button type="button" class="dp-row-btn dp-fav-btn${active ? ' dp-fav-btn--active' : ''}" data-fav-key="${escapeHtml(key)}" aria-pressed="${active}" aria-label="${label}" title="${label}">${ICON_HEART}</button>`;
 }
 
-function renderStop(kind, loc, dateObj, timeStr) {
+function renderStop(kind: 'load' | 'unload', loc: Location, dateObj: Date | null, timeStr: string): string {
   const { cc, rest } = splitCountry(loc.countryCity);
   const address = [loc.street, loc.countryCity].filter(Boolean).join(', ');
   const pinUrl = buildSingleMapsUrl(loc);
@@ -376,7 +314,7 @@ function renderStop(kind, loc, dateObj, timeStr) {
     </div>`;
 }
 
-function renderCard(t) {
+function renderCard(t: EnrichedTask): HTMLElement {
   const card = document.createElement('article');
   card.className = 'dp-card' + (t.isNew ? ' dp-card--new' : '');
   card.setAttribute('aria-label', `Truck ${t.truck}`);
@@ -419,7 +357,7 @@ function renderList() {
   const searched = q ? allTasks.filter((t) => (t.truck || '').toLowerCase().includes(q)) : allTasks;
 
   const now = new Date();
-  const enriched = searched.map((t) => ({
+  const enriched: EnrichedTask[] = searched.map((t) => ({
     ...t,
     load: parseDMY(t.loadingDateTime),
     unload: parseDMY(t.unloadingDateTime),
@@ -428,10 +366,10 @@ function renderList() {
     isNew: unseenSet.has(t.number),
   }));
 
-  const isToday = (d) => d && dayDiff(d, now) === 0;
-  const isTomorrow = (d) => d && dayDiff(d, now) === 1;
-  const todayMatches = (t) => isToday(t.load.date) || isToday(t.unload.date);
-  const tomorrowMatches = (t) => isTomorrow(t.load.date) || isTomorrow(t.unload.date);
+  const isToday = (d: Date | null) => !!d && dayDiff(d, now) === 0;
+  const isTomorrow = (d: Date | null) => !!d && dayDiff(d, now) === 1;
+  const todayMatches = (t: EnrichedTask) => isToday(t.load.date) || isToday(t.unload.date);
+  const tomorrowMatches = (t: EnrichedTask) => isTomorrow(t.load.date) || isTomorrow(t.unload.date);
 
   countAllEl.textContent = String(enriched.length);
   countTodayEl.textContent = String(enriched.filter(todayMatches).length);
@@ -454,13 +392,13 @@ function renderList() {
     })
     .forEach((t, i) => {
       const card = renderCard(t);
-      card.style.setProperty('--i', i);
+      card.style.setProperty('--i', String(i));
       card.classList.add('dp-card--enter');
       listEl.appendChild(card);
     });
 }
 
-function updateSyncStatus(animate) {
+function updateSyncStatus(animate?: boolean) {
   if (!syncedAt) {
     syncStatusEl.classList.remove('dp-sync--stale');
     syncStatusTextEl.textContent = 'Click Sync to load tasks';
@@ -474,9 +412,7 @@ function updateSyncStatus(animate) {
   const agoText = elapsedMin < 1 ? 'just now' : `${elapsedMin} min ago`;
 
   syncStatusEl.classList.toggle('dp-sync--stale', stale);
-  syncStatusTextEl.innerHTML = stale
-    ? `<b>Out of date</b> · ${timeStr}`
-    : `<b>Synced</b> ${agoText} · ${timeStr}`;
+  syncStatusTextEl.innerHTML = stale ? `<b>Out of date</b> · ${timeStr}` : `<b>Synced</b> ${agoText} · ${timeStr}`;
 
   if (animate) {
     syncStatusTextEl.classList.remove('dp-swap');

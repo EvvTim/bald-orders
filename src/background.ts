@@ -1,9 +1,12 @@
 // Service worker: owns scheduled auto-sync and the actual sync routine.
-// The popup just asks this worker to sync and reads results from storage.
+// The side panel just asks this worker to sync and reads results from storage.
+
+import { computeTaskDiff } from './lib/sync';
+import type { Settings, StoredState, Task } from './lib/types';
 
 const TASKS_URL = 'https://portal.baldlogistics.eu/app/main/current-tasks';
 const ALARM_NAME = 'auto-sync-tasks';
-const DEFAULT_SETTINGS = { autoSyncEnabled: true, intervalMinutes: 10 };
+const DEFAULT_SETTINGS: Settings = { autoSyncEnabled: true, intervalMinutes: 10 };
 
 chrome.runtime.onInstalled.addListener(() => {
   // Makes clicking the toolbar icon open the side panel directly, instead of
@@ -47,12 +50,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-async function getSettings() {
-  const { settings } = await chrome.storage.local.get('settings');
+async function getSettings(): Promise<Settings> {
+  const { settings } = await chrome.storage.local.get<StoredState>('settings');
   return { ...DEFAULT_SETTINGS, ...(settings || {}) };
 }
 
-async function scheduleAlarm() {
+async function scheduleAlarm(): Promise<void> {
   const settings = await getSettings();
   await chrome.alarms.clear(ALARM_NAME);
   if (settings.autoSyncEnabled) {
@@ -64,75 +67,52 @@ async function scheduleAlarm() {
 // Every sync opens a fresh background tab on the tasks page, force-reloads
 // it to bypass any stale SPA state, scrapes the table, and closes the tab
 // again — it never touches a tab the user might already have open there.
-async function performSync() {
+async function performSync(): Promise<Task[]> {
   const tab = await chrome.tabs.create({ url: TASKS_URL, active: false });
   try {
-    await waitForTabComplete(tab.id);
-    await chrome.tabs.reload(tab.id);
-    await waitForTabComplete(tab.id);
+    await waitForTabComplete(tab.id!);
+    await chrome.tabs.reload(tab.id!);
+    await waitForTabComplete(tab.id!);
 
-    const response = await sendMessageWithRetry(tab.id, { type: 'SCRAPE_TASKS' }, 5);
+    const response = await sendMessageWithRetry(tab.id!, { type: 'SCRAPE_TASKS' }, 5);
     if (!response || !response.ok) {
       throw new Error((response && response.error) || 'Failed to get data from the page');
     }
-    const tasks = response.tasks;
+    const tasks: Task[] = response.tasks;
     const syncedAt = Date.now();
-    const { knownNumbers, unseenNumbers } = await diffNewTasks(tasks);
+    const stored = await chrome.storage.local.get<StoredState>(['knownNumbers', 'unseenNumbers']);
+    const { knownNumbers, unseenNumbers } = computeTaskDiff(tasks, stored.knownNumbers, stored.unseenNumbers);
 
     await chrome.storage.local.set({ tasks, syncedAt, knownNumbers, unseenNumbers });
     await updateBadge(unseenNumbers.length);
     return tasks;
   } finally {
-    chrome.tabs.remove(tab.id).catch(() => {});
+    chrome.tabs.remove(tab.id!).catch(() => {});
   }
 }
 
-// Tracks which task numbers have been seen before (knownNumbers, the
-// baseline) and which newly-appeared ones the user hasn't acknowledged yet
-// (unseenNumbers, drives the badge + "New" label until the card is hovered).
-async function diffNewTasks(tasks) {
-  const stored = await chrome.storage.local.get(['knownNumbers', 'unseenNumbers']);
-  const currentNumbers = tasks.map((t) => t.number).filter(Boolean);
-  const currentSet = new Set(currentNumbers);
-
-  if (!stored.knownNumbers) {
-    // First sync ever: establish the baseline, nothing is flagged as "new".
-    return { knownNumbers: currentNumbers, unseenNumbers: [] };
-  }
-
-  const knownSet = new Set(stored.knownNumbers);
-  const unseenSet = new Set(stored.unseenNumbers || []);
-  currentNumbers.forEach((n) => {
-    if (!knownSet.has(n)) unseenSet.add(n);
-  });
-
-  const unseenNumbers = [...unseenSet].filter((n) => currentSet.has(n));
-  const knownNumbers = [...new Set([...stored.knownNumbers, ...currentNumbers])];
-  return { knownNumbers, unseenNumbers };
-}
-
-async function ackTask(number) {
-  const { unseenNumbers = [] } = await chrome.storage.local.get('unseenNumbers');
-  const next = unseenNumbers.filter((n) => n !== number);
+async function ackTask(number: string): Promise<void> {
+  const { unseenNumbers = [] } = await chrome.storage.local.get<StoredState>('unseenNumbers');
+  const next = unseenNumbers.filter((n: string) => n !== number);
   await chrome.storage.local.set({ unseenNumbers: next });
   await updateBadge(next.length);
 }
 
-async function updateBadge(count) {
+async function updateBadge(count: number): Promise<void> {
   await chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
   if (count > 0) {
     await chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
   }
 }
 
-async function restoreBadge() {
-  const { unseenNumbers = [] } = await chrome.storage.local.get('unseenNumbers');
+async function restoreBadge(): Promise<void> {
+  const { unseenNumbers = [] } = await chrome.storage.local.get<StoredState>('unseenNumbers');
   await updateBadge(unseenNumbers.length);
 }
 
-function waitForTabComplete(tabId) {
+function waitForTabComplete(tabId: number): Promise<void> {
   return new Promise((resolve) => {
-    function listener(id, info) {
+    function listener(id: number, info: chrome.tabs.OnUpdatedInfo) {
       if (id === tabId && info.status === 'complete') {
         chrome.tabs.onUpdated.removeListener(listener);
         resolve();
@@ -142,39 +122,41 @@ function waitForTabComplete(tabId) {
   });
 }
 
-async function ensureContentScript(tabId) {
+async function ensureContentScript(tabId: number): Promise<void> {
   // Tabs opened before the extension was installed/reloaded never get the
   // declarative content script, which is what causes "Could not establish
   // connection. Receiving end does not exist." Inject it explicitly as a
-  // fallback; content.js guards itself against double registration.
+  // fallback; content.ts guards itself against double registration.
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['src/content.js'] });
   } catch (_e) {
     // Ignore: page may not be injectable, or script is already present.
   }
 }
 
-async function sendMessageWithRetry(tabId, msg, attemptsLeft) {
-  await ensureContentScript(tabId);
-  return new Promise((resolve, reject) => {
-    function attempt(remaining) {
-      chrome.tabs.sendMessage(tabId, msg, (response) => {
-        if (chrome.runtime.lastError || !response) {
-          if (remaining > 0) {
-            setTimeout(() => attempt(remaining - 1), 800);
-          } else {
-            reject(
-              new Error(
-                (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                  'The tasks page is not responding. Make sure you are logged in.'
-              )
-            );
-          }
-          return;
+function sendMessageWithRetry(tabId: number, msg: unknown, attemptsLeft: number): Promise<any> {
+  return ensureContentScript(tabId).then(
+    () =>
+      new Promise((resolve, reject) => {
+        function attempt(remaining: number) {
+          chrome.tabs.sendMessage(tabId, msg, (response) => {
+            if (chrome.runtime.lastError || !response) {
+              if (remaining > 0) {
+                setTimeout(() => attempt(remaining - 1), 800);
+              } else {
+                reject(
+                  new Error(
+                    (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                      'The tasks page is not responding. Make sure you are logged in.'
+                  )
+                );
+              }
+              return;
+            }
+            resolve(response);
+          });
         }
-        resolve(response);
-      });
-    }
-    attempt(attemptsLeft);
-  });
+        attempt(attemptsLeft);
+      })
+  );
 }
